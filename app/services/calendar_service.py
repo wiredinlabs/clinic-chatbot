@@ -3,7 +3,8 @@ import asyncio
 from datetime import date, datetime, timedelta, time as dt_time
 from typing import Dict, Any, List, Optional, Tuple
 from zoneinfo import ZoneInfo
-
+import os
+import json
 # Google Calendar imports
 try:
     from google.oauth2.service_account import Credentials
@@ -22,36 +23,88 @@ class CalendarService:
         self.calendar_timezone = 'UTC'
         self._initialize_service()
 
+    # def _initialize_service(self):
+    #     """Initialize Google Calendar service"""
+    #     try:
+    #         if not GOOGLE_AVAILABLE:
+    #             print("❌ Google Calendar libraries not installed.")
+    #             return
+
+    #         import os
+    #         creds_file = settings.google_calendar_credentials_file
+
+    #         if not os.path.exists(creds_file):
+    #             print(f"❌ Google Calendar credentials file not found at {creds_file}.")
+    #             return
+
+    #         self.credentials = Credentials.from_service_account_file(
+    #             creds_file,
+    #             scopes=['https://www.googleapis.com/auth/calendar']
+    #         )
+    #         self.service = build('calendar', 'v3', credentials=self.credentials)
+
+    #         calendar_settings = self.service.calendars().get(calendarId='primary').execute()
+    #         self.calendar_timezone = calendar_settings.get('timeZone', 'UTC')
+
+    #         print("✅ Google Calendar service initialized")
+    #         print(f"📍 Calendar timezone: {self.calendar_timezone}")
+
+    #     except Exception as e:
+    #         print(f"❌ Failed to initialize calendar service: {e}")
+    #         self.service = None
+
     def _initialize_service(self):
-        """Initialize Google Calendar service"""
+        """Initialize Google Calendar service with environment variable support"""
         try:
             if not GOOGLE_AVAILABLE:
                 print("❌ Google Calendar libraries not installed.")
                 return
 
-            import os
-            creds_file = settings.google_calendar_credentials_file
+            # Method 1: Try environment variable first (for production/Render)
+            creds_json = os.getenv('GOOGLE_CREDENTIALS_JSON')
+            if creds_json:
+                try:
+                    # Parse JSON from environment variable
+                    credentials_info = json.loads(creds_json)
+                    self.credentials = Credentials.from_service_account_info(
+                        credentials_info,
+                        scopes=['https://www.googleapis.com/auth/calendar']
+                    )
+                    print("✅ Google Calendar credentials loaded from environment variable")
+                except json.JSONDecodeError as e:
+                    print(f"❌ Invalid JSON in GOOGLE_CREDENTIALS_JSON: {e}")
+                    return
+            else:
+                # Method 2: Fallback to file (for local development)
+                creds_file = settings.google_calendar_credentials_file
+                if os.path.exists(creds_file):
+                    self.credentials = Credentials.from_service_account_file(
+                        creds_file,
+                        scopes=['https://www.googleapis.com/auth/calendar']
+                    )
+                    print("✅ Google Calendar credentials loaded from file")
+                else:
+                    print(f"❌ No credentials found. Set GOOGLE_CREDENTIALS_JSON environment variable or provide file at {creds_file}")
+                    return
 
-            if not os.path.exists(creds_file):
-                print(f"❌ Google Calendar credentials file not found at {creds_file}.")
-                return
-
-            self.credentials = Credentials.from_service_account_file(
-                creds_file,
-                scopes=['https://www.googleapis.com/auth/calendar']
-            )
-            self.service = build('calendar', 'v3', credentials=self.credentials)
-
-            calendar_settings = self.service.calendars().get(calendarId='primary').execute()
-            self.calendar_timezone = calendar_settings.get('timeZone', 'UTC')
-
-            print("✅ Google Calendar service initialized")
-            print(f"📍 Calendar timezone: {self.calendar_timezone}")
+            # Initialize the service
+            if self.credentials:
+                self.service = build('calendar', 'v3', credentials=self.credentials)
+                
+                # Get calendar timezone
+                calendar_settings = self.service.calendars().get(calendarId='primary').execute()
+                self.calendar_timezone = calendar_settings.get('timeZone', 'UTC')
+                
+                print("✅ Google Calendar service initialized successfully")
+                print(f"📍 Calendar timezone: {self.calendar_timezone}")
+            else:
+                print("❌ Failed to load credentials")
+                self.service = None
 
         except Exception as e:
             print(f"❌ Failed to initialize calendar service: {e}")
             self.service = None
-
+            
     def _find_doctor_for_service(self, service: str, clinic_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Find the appropriate doctor for a given service"""
         if not clinic_data or 'Doctors' not in clinic_data:
